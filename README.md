@@ -131,9 +131,51 @@ Contract-I/
 └── requirements.txt        # Python dependencies
 ```
 
-## Deployment
+## Docker Deployment
 
-The application can be deployed using:
+The project is fully dockerized and can be run using Docker Compose.
+
+### Prerequisites
+
+- Docker and Docker Compose installed on your system
+- OpenRouter API key
+
+### Setup
+
+1. Create a `.env` file in the backend directory with your OpenRouter API key:
+
+```bash
+cd backend
+echo "OPENROUTER_API_KEY=your_api_key_here" > .env
+```
+
+2. Build and start the containers:
+
+```bash
+docker-compose up -d --build
+```
+
+This will start three containers:
+- Backend API on http://localhost:8001
+- Frontend application on http://localhost:3000
+- MongoDB database on port 27017
+
+3. To stop the containers:
+
+```bash
+docker-compose down
+```
+
+### Persistent Data
+
+The following data is persisted using Docker volumes:
+- MongoDB data
+- Uploaded PDF files
+- Contract data in file storage
+
+## Cloud Deployment
+
+The application can also be deployed to cloud services:
 
 - Backend: Hugging Face Spaces (using the provided Dockerfile.hf)
 - Frontend: Vercel or any static hosting service

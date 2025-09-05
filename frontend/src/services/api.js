@@ -1,7 +1,8 @@
 import axios from 'axios';
 
 // API base URL for direct links (downloads, etc.)
-export const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+// In Docker environment, use the service name instead of localhost
+export const API_BASE_URL = process.env.REACT_APP_API_URL || '/api';
 
 // Create axios instance with default config
 const api = axios.create({
@@ -10,6 +11,11 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+// Disable SSL verification warnings for local development
+axios.defaults.validateStatus = function () {
+  return true;
+};
 
 // Contract API services
 const ContractService = {

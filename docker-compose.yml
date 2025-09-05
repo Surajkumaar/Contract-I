@@ -1,0 +1,48 @@
+services:
+  # Backend service
+  backend:
+    build: ./backend
+    container_name: contract-intelligence-backend
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./backend/uploads:/app/uploads
+      - ./backend/file_storage:/app/file_storage
+      - ./backend/.env:/app/.env
+      - ./requirements.txt:/requirements.txt
+    environment:
+      - MONGO_URL=mongodb://mongodb:27017
+      - OPENROUTER_API_KEY=sk-or-v1-38cf614d3718496e1a875477902868d923f2e7bf31db7ef738377da47198c3b50
+    depends_on:
+      - mongodb
+    networks:
+      - contract-network
+
+  # Frontend service
+  frontend:
+    build: ./frontend
+    container_name: contract-intelligence-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - contract-network
+
+  # MongoDB service
+  mongodb:
+    image: mongo:latest
+    container_name: contract-intelligence-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - contract-network
+
+networks:
+  contract-network:
+    driver: bridge
+
+volumes:
+  mongodb_data:
