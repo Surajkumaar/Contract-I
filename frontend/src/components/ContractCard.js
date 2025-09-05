@@ -7,7 +7,9 @@ import Button from '@mui/material/Button';
 import Box from '@mui/material/Box';
 import LinearProgress from '@mui/material/LinearProgress';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+import DownloadIcon from '@mui/icons-material/Download';
 import Chip from '@mui/material/Chip';
+import { API_BASE_URL } from '../services/api';
 
 const ContractCard = ({ contract }) => {
   
@@ -62,6 +64,18 @@ const ContractCard = ({ contract }) => {
         )}
       </CardContent>
       
+      <CardActions>
+        <Button 
+          size="small" 
+          startIcon={<DownloadIcon />} 
+          href={`${API_BASE_URL}/contracts/${contract.contract_id || contract._id}/download`}
+          target="_blank"
+          download
+          disabled={contract.status === 'error' || !(contract.contract_id || contract._id)}
+        >
+          Download PDF
+        </Button>
+      </CardActions>
     </Card>
   );
 };

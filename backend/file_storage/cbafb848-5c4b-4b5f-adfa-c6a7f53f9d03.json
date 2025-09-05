@@ -1,0 +1,1 @@
+{"_id": "cbafb848-5c4b-4b5f-adfa-c6a7f53f9d03", "filename": "sample_contract.pdf", "status": "error", "progress": 100, "file_size_bytes": 92565, "extracted_data": null, "error": "update_contract_status() got an unexpected keyword argument 'progress'", "created_at": 1757063784}

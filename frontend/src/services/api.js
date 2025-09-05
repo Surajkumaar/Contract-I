@@ -1,8 +1,11 @@
 import axios from 'axios';
 
+// API base URL for direct links (downloads, etc.)
+export const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+
 // Create axios instance with default config
 const api = axios.create({
-  baseURL: process.env.REACT_APP_API_URL || 'http://localhost:8000',
+  baseURL: API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -61,6 +64,11 @@ const ContractService = {
       console.error('Error uploading contract:', error);
       throw error;
     }
+  },
+  
+  // Get download URL for contract PDF
+  getContractDownloadUrl: (contractId) => {
+    return `${API_BASE_URL}/contracts/${contractId}/download`;
   },
 };
 

@@ -14,7 +14,7 @@ import time
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pypdf import PdfReader
 from pydantic import BaseModel
@@ -81,7 +81,11 @@ except Exception as e:
     contracts_collection = None
 
 # ----------------- FastAPI App -----------------
-app = FastAPI(title="Contract Intelligence API")
+app = FastAPI(
+    title="Contract Intelligence API",
+    # Increase maximum request size to handle large PDFs (100MB)
+    max_request_size=104857600
+)
 
 # Add CORS middleware
 app.add_middleware(
@@ -134,11 +138,260 @@ async def test_network_connectivity() -> bool:
     return False
 
 async def extract_text_from_pdf(file_path: str) -> str:
+    """Extract text from PDF with memory optimization"""
     reader = PdfReader(file_path)
     text = ""
+    # Process one page at a time to reduce memory usage
     for page in reader.pages:
         text += page.extract_text() or ""
+        # Free up memory by clearing page cache
+        page._objects = None
     return text
+
+def chunk_text(text: str, chunk_size: int = 8000, overlap: int = 500) -> list[str]:
+    """Split text into chunks suitable for LLM processing"""
+    if len(text) <= chunk_size:
+        return [text]
+        
+    chunks = []
+    start = 0
+    while start < len(text):
+        # Take a chunk of text
+        end = min(start + chunk_size, len(text))
+        
+        # Try to find a good breaking point (newline or period)
+        if end < len(text):
+            # Look for a newline or period to break at
+            for break_char in ['\n\n', '\n', '. ', ', ', ' ']:
+                break_pos = text.rfind(break_char, start, end)
+                if break_pos > start + chunk_size // 2:  # Ensure chunk isn't too small
+                    end = break_pos + len(break_char)
+                    break
+        
+        chunks.append(text[start:end])
+        # Start next chunk with overlap for context
+        start = max(start, end - overlap)
+    
+    return chunks
+
+async def query_mistral_llm(contract_text: str) -> dict:
+    """
+    Query the Mistral LLM via OpenRouter API with support for large documents"""
+    if not OPENROUTER_API_KEY:
+        raise ValueError("OPENROUTER_API_KEY environment variable is not set. Please set it before making API calls.")
+    
+    # Check if text needs to be chunked (over 15K characters is likely to exceed token limits)
+    if len(contract_text) > 15000:
+        print(f"Contract text is large ({len(contract_text)} chars), chunking for processing")
+        return await process_large_document(contract_text)
+    else:
+        # Process normally for smaller documents
+        return await query_mistral_llm_single(contract_text)
+
+async def process_large_document(contract_text: str) -> dict:
+    """Process a large document by chunking and combining results"""
+    # Split text into manageable chunks
+    chunks = chunk_text(contract_text)
+    print(f"Split document into {len(chunks)} chunks for processing")
+    
+    # Process each chunk to extract information
+    chunk_results = []
+    for i, chunk in enumerate(chunks):
+        print(f"Processing chunk {i+1}/{len(chunks)}...")
+        try:
+            # Process each chunk with a simplified prompt focused on extraction
+            chunk_result = await query_mistral_llm_single(
+                chunk, 
+                is_chunk=True, 
+                chunk_num=i+1, 
+                total_chunks=len(chunks)
+            )
+            chunk_results.append(chunk_result)
+        except Exception as e:
+            print(f"Error processing chunk {i+1}: {str(e)}")
+    
+    # Combine results from all chunks
+    combined_result = combine_chunk_results(chunk_results)
+    return combined_result
+
+def combine_chunk_results(chunk_results: list) -> dict:
+    """Combine results from multiple chunks into a single coherent result"""
+    if not chunk_results:
+        return {}
+    
+    # Initialize with empty structures
+    combined = {
+        "parties": [],
+        "financials": {},
+        "payment_terms": {},
+        "sla": {},
+        "contacts": [],
+        "additional_fields": {}
+    }
+    
+    # Track seen items to avoid duplicates
+    seen_parties = set()
+    seen_contacts = set()
+    
+    for result in chunk_results:
+        # Merge parties (avoiding duplicates)
+        if result.get("parties"):
+            for party in result["parties"]:
+                # Create a simple hash for deduplication
+                if isinstance(party, dict) and party.get("name"):
+                    party_key = party["name"].lower()
+                    if party_key not in seen_parties:
+                        seen_parties.add(party_key)
+                        combined["parties"].append(party)
+                elif isinstance(party, str) and party.lower() not in seen_parties:
+                    seen_parties.add(party.lower())
+                    combined["parties"].append(party)
+        
+        # Merge financials (take most complete information)
+        if result.get("financials") and isinstance(result["financials"], dict):
+            combined["financials"].update(result["financials"])
+        
+        # Merge payment terms
+        if result.get("payment_terms") and isinstance(result["payment_terms"], dict):
+            combined["payment_terms"].update(result["payment_terms"])
+        
+        # Merge SLA information
+        if result.get("sla") and isinstance(result["sla"], dict):
+            combined["sla"].update(result["sla"])
+        
+        # Merge contacts (avoiding duplicates)
+        if result.get("contacts"):
+            for contact in result["contacts"]:
+                # Create a simple hash for deduplication
+                if isinstance(contact, dict) and contact.get("name"):
+                    contact_key = contact["name"].lower()
+                    if contact_key not in seen_contacts:
+                        seen_contacts.add(contact_key)
+                        combined["contacts"].append(contact)
+                elif isinstance(contact, str) and contact.lower() not in seen_contacts:
+                    seen_contacts.add(contact.lower())
+                    combined["contacts"].append(contact)
+        
+        # Merge additional fields
+        if result.get("additional_fields") and isinstance(result["additional_fields"], dict):
+            combined["additional_fields"].update(result["additional_fields"])
+    
+    return combined
+
+async def query_mistral_llm_single(contract_text: str, is_chunk=False, chunk_num=None, total_chunks=None) -> dict:
+    """Query the Mistral LLM for a single chunk of text"""
+    system_prompt = "You are a specialized AI assistant for contract analysis. Your task is to extract structured information from contract documents and return it as valid JSON. Be precise and thorough in your extraction."
+    
+    # Adjust prompt based on whether this is a chunk or full document
+    if is_chunk:
+        user_prompt = f"""You are analyzing chunk {chunk_num} of {total_chunks} from a large contract document.
+
+Extract the following contract details as a valid JSON object with these keys:
+
+1. parties: Array of entities involved in the contract (names, roles, addresses)
+2. financials: Object containing monetary details (amounts, currencies, total value)
+3. payment_terms: Object with payment schedule, methods, penalties
+4. sla: Service level agreements, performance metrics, guarantees
+5. contacts: Key personnel, points of contact, contact information
+6. additional_fields: Object containing ANY other important information found in the contract
+
+If any field is missing or cannot be determined, set it as null or an empty structure. Focus on extracting what's available in this chunk.
+
+Your response MUST be a valid JSON object without any explanatory text before or after.
+
+Contract text (chunk {chunk_num}/{total_chunks}):
+{contract_text}
+"""
+    else:
+        user_prompt = f"""Extract the following contract details as a valid JSON object with these keys:
+
+1. parties: Array of entities involved in the contract (names, roles, addresses)
+2. financials: Object containing monetary details (amounts, currencies, total value)
+3. payment_terms: Object with payment schedule, methods, penalties
+4. sla: Service level agreements, performance metrics, guarantees
+5. contacts: Key personnel, points of contact, contact information
+6. additional_fields: Object containing ANY other important information found in the contract
+
+If any field is missing or cannot be determined, set it as null. For additional_fields, include any important information that doesn't fit the standard categories.
+
+Your response MUST be a valid JSON object without any explanatory text before or after. Format:
+{{"parties": [...], "financials": {{...}}, "payment_terms": {{...}}, "sla": {{...}}, "contacts": {{...}}, "additional_fields": {{...}}}}
+
+Contract text:
+{contract_text}
+"""
+
+    try:
+        # First try with httpx
+        async with httpx.AsyncClient(timeout=60, verify=False) as client:
+            headers = {
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json"
+            }
+            
+            payload = {
+                "model": "mistralai/mistral-7b-instruct",
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ]
+            }
+            
+            response = await client.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                json=payload,
+                headers=headers
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if "choices" in data and len(data["choices"]) > 0:
+                    text_output = data["choices"][0]["message"]["content"]
+                    
+                    try:
+                        # First try direct JSON parsing
+                        extracted = json.loads(text_output)
+                        return extracted
+                    except json.JSONDecodeError:
+                        print("JSON parsing failed, attempting to extract JSON from text")
+                        # Try to extract JSON from text (sometimes model wraps JSON in markdown or explanations)
+                        import re
+                        json_match = re.search(r'\{[\s\S]*\}', text_output)
+                        if json_match:
+                            try:
+                                json_str = json_match.group(0)
+                                # Try to parse as is
+                                try:
+                                    extracted = json.loads(json_str)
+                                    return extracted
+                                except json.JSONDecodeError:
+                                    # Try to fix truncated JSON by adding missing closing braces
+                                    print("Attempting to fix truncated JSON")
+                                    # Count opening and closing braces
+                                    open_braces = json_str.count('{')
+                                    close_braces = json_str.count('}')
+                                    if open_braces > close_braces:
+                                        # Add missing closing braces
+                                        json_str += '}' * (open_braces - close_braces)
+                                        try:
+                                            extracted = json.loads(json_str)
+                                            return extracted
+                                        except json.JSONDecodeError:
+                                            pass
+                            except Exception as e:
+                                print(f"Error extracting JSON: {str(e)}")
+            
+            # If we get here, either the API call failed or JSON parsing failed
+            print(f"OpenRouter API call failed with status {response.status_code}")
+            print(f"Response: {response.text}")
+            
+            # Try the fallback method
+            return await query_mistral_llm_requests_fallback(contract_text)
+            
+    except Exception as e:
+        print(f"Error in query_mistral_llm: {str(e)}")
+        # Try the fallback method
+        return await query_mistral_llm_requests_fallback(contract_text)
 
 async def query_mistral_llm_requests_fallback(contract_text: str) -> dict:
     """
@@ -617,48 +870,51 @@ Contract text:
 # Mock data generation removed as per requirement
 
 async def process_contract(contract_id: str, file_path: str):
-    """
-    Background task: extract PDF text, query LLM, update storage
-    """
+    """Process a contract file and extract information with memory optimization"""
+    global USE_MONGO
+    
     try:
-        # Update contract status to processing
-        update_contract_status(contract_id, {"status": "processing", "progress": 10})
-
-        text = await extract_text_from_pdf(file_path)
-
-        # Update progress
-        update_contract_status(contract_id, {"progress": 30})
-
-        if not OPENROUTER_API_KEY:
-            # If API key is missing, don't extract any data
-            update_contract_status(contract_id, {
-                "status": "completed",
-                "progress": 100,
-                "extracted_data": None,
-                "error": "No API key provided. Only PDF storage is available."
-            })
-            return
-
-        # Test network connectivity first
-        update_contract_status(contract_id, {"progress": 40})
+        # Update status to processing
+        await update_contract_status(contract_id, status="processing", progress=5)
         
-        network_ok = await test_network_connectivity()
-        if not network_ok:
-            update_contract_status(contract_id, {
-                "status": "error",
-                "progress": 100,
-                "error": "No internet connectivity detected. Please check your network connection."
-            })
+        # Get file size for progress tracking
+        file_size = os.path.getsize(file_path)
+        is_large_file = file_size > 10 * 1024 * 1024  # 10MB threshold
+        
+        if is_large_file:
+            print(f"Processing large PDF ({file_size / (1024 * 1024):.2f} MB) with optimized memory usage")
+        
+        # Extract text from PDF with memory optimization
+        contract_text = await extract_text_from_pdf(file_path)
+        
+        # Free up memory by clearing references
+        import gc
+        gc.collect()
+        
+        await update_contract_status(contract_id, status="processing", progress=30)
+        
+        # Check internet connectivity before proceeding
+        has_connectivity = await test_network_connectivity()
+        if not has_connectivity:
+            print(f"No internet connectivity detected for contract {contract_id}")
+            await update_contract_status(contract_id, status="error", progress=100, 
+                                      error="No internet connectivity detected. Please check your network connection.")
             return
-            
-        update_contract_status(contract_id, {"progress": 50})
-            
-        # If API key is available and network is working, proceed with extraction
-        extracted_data = await query_mistral_llm(text)
-
-        update_contract_status(contract_id, {
-            "status": "completed",
-            "progress": 100,
+        
+        await update_contract_status(contract_id, status="processing", progress=50)
+        
+        # Query LLM for extraction with chunking for large documents
+        extracted_data = await query_mistral_llm(contract_text)
+        
+        # Free up memory again
+        contract_text = None
+        gc.collect()
+        
+        await update_contract_status(contract_id, status="processing", progress=90)
+        
+        # Update contract with extracted data
+        await update_contract_status(contract_id, status="completed", progress=100)
+        await update_contract(contract_id, {
             "extracted_data": extracted_data
         })
     except Exception as e:
@@ -671,11 +927,7 @@ async def process_contract(contract_id: str, file_path: str):
         elif "timeout" in error_message.lower():
             error_message = "Connection timeout. Please check your internet connection."
         
-        update_contract_status(contract_id, {
-            "status": "error",
-            "progress": 100,
-            "error": error_message
-        })
+        await update_contract_status(contract_id, status="error", progress=100, error=error_message)
 
 # ----------------- Routes -----------------
 @app.post("/contracts/upload")
@@ -686,14 +938,33 @@ async def upload_contract(file: UploadFile = File(...), background_tasks: Backgr
     contract_id = str(uuid.uuid4())
     file_path = os.path.join(UPLOAD_DIR, f"{contract_id}.pdf")
     
-    with open(file_path, "wb") as f:
-        f.write(await file.read())
+    # Stream the file to disk in chunks to handle large files
+    file_size = 0
+    chunk_size = 1024 * 1024  # 1MB chunks
+    
+    try:
+        with open(file_path, "wb") as f:
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+                file_size += len(chunk)
+                f.write(chunk)
+                
+        print(f"Uploaded file size: {file_size / (1024 * 1024):.2f} MB")
+    except Exception as e:
+        print(f"Error during file upload: {str(e)}")
+        if os.path.exists(file_path):
+            os.remove(file_path)  # Clean up partial file
+        raise HTTPException(status_code=500, detail=f"File upload failed: {str(e)}")
 
+    # Create contract document
     contract_doc = {
         "_id": contract_id,
         "filename": file.filename,
         "status": "uploaded",
         "progress": 0,
+        "file_size_bytes": file_size,
         "extracted_data": None,
         "error": None,
         "created_at": int(time.time())  # Unix timestamp for sorting
@@ -798,6 +1069,47 @@ async def get_contract_data(contract_id: str):
     # This allows the frontend to display contract info for any status
     return contract
 
+@app.get("/contracts/{contract_id}/download")
+async def download_contract_pdf(contract_id: str):
+    """Download the original PDF file for a contract"""
+    # Check if contract exists
+    global USE_MONGO
+    contract = None
+    
+    # Try to get contract from available storage to verify it exists
+    if USE_MONGO:
+        try:
+            contract = await asyncio.wait_for(
+                contracts_collection.find_one({"_id": contract_id}),
+                timeout=2.0
+            )
+        except Exception:
+            # Fall back to file storage
+            contract = load_contract_from_file(contract_id)
+    else:
+        # Use file-based storage
+        contract = load_contract_from_file(contract_id)
+        
+    if not contract:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    
+    # Construct the path to the PDF file
+    file_path = os.path.join(UPLOAD_DIR, f"{contract_id}.pdf")
+    
+    # Check if file exists
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="PDF file not found")
+    
+    # Get original filename from contract metadata
+    filename = contract.get("filename", f"contract_{contract_id}.pdf")
+    
+    # Return the file as a downloadable response
+    return FileResponse(
+        path=file_path,
+        filename=filename,
+        media_type="application/pdf"
+    )
+
 @app.get("/contracts")
 async def list_contracts():
     """Get a list of all contracts with their status information"""
@@ -900,12 +1212,29 @@ def load_all_contracts_from_files() -> list:
         print(f"❌ Error loading contracts from files: {str(e)}")
         return []
 
-def update_contract_status(contract_id: str, update_data: dict):
-    """Update contract status in the appropriate storage"""
+async def update_contract_status(contract_id: str, status=None, progress=None, error=None):
+    """Update contract status in the appropriate storage
+    
+    Can be called with either individual parameters or as a dictionary
+    """
+    # Create update data dictionary from parameters
+    update_data = {}
+    if isinstance(status, str):
+        update_data["status"] = status
+    if progress is not None:
+        update_data["progress"] = progress
+    if error is not None:
+        update_data["error"] = error
+        
+    # Call the update function with the dictionary
+    await update_contract(contract_id, update_data)
+
+async def update_contract(contract_id: str, update_data: dict):
+    """Update contract in the appropriate storage"""
     if USE_MONGO:
         try:
             # Try MongoDB first
-            asyncio.create_task(_update_mongo_contract(contract_id, update_data))
+            await _update_mongo_contract(contract_id, update_data)
         except Exception as e:
             print(f"MongoDB update failed: {str(e)}")
             # Fall back to file storage
