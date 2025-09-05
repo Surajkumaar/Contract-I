@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  # Backend service
+  backend:
+    build: ./backend
+    container_name: contract-intelligence-backend
+    restart: always
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/uploads:/app/uploads
+      - ./backend/file_storage:/app/file_storage
+    environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - MONGODB_URI=${MONGODB_URI:-mongodb://mongo:27017/contract_intelligence}
+    depends_on:
+      - mongo
+
+  # Frontend service
+  frontend:
+    build: ./frontend
+    container_name: contract-intelligence-frontend
+    restart: always
+    ports:
+      - "3000:80"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+
+  # MongoDB service
+  mongo:
+    image: mongo:latest
+    container_name: contract-intelligence-mongo
+    restart: always
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+volumes:
+  mongo_data:

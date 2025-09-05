@@ -1,0 +1,1 @@
+{"_id": "6c50f791-3f53-43d8-a5fb-85a0852a9562", "filename": "take this as reff and give new one.pdf", "status": "error", "progress": 100, "file_size_bytes": 222283, "extracted_data": null, "error": "update_contract_status() got an unexpected keyword argument 'progress'", "created_at": 1757063754}
