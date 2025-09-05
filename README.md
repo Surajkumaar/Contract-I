@@ -1,203 +1,153 @@
 # Contract Intelligence
 
-A modern web application for extracting and analyzing structured data from contract PDFs using AI. The system uses Mistral AI via OpenRouter API to extract key information from contracts and presents it in a user-friendly interface.
+A web application for extracting and analyzing structured data from contract PDFs using Mistral AI via OpenRouter API.
 
-## Features
+## Project Overview
 
-- **PDF Contract Upload**: Upload contract PDFs for automated information extraction
-- **Large File Support**: Process PDFs up to 50MB with optimized memory handling
-- **Dynamic Field Extraction**: Extract standard contract fields and any additional fields found in the document
-- **Real-time Processing Status**: Track extraction progress with status indicators
-- **Structured Data View**: View extracted contract data in a well-organized format
-- **Responsive UI**: Modern, mobile-friendly user interface
+Contract Intelligence is a full-stack application that helps users extract and analyze key information from contract documents. The application processes PDF contracts and extracts structured data including parties involved, financial details, payment terms, SLAs, and contact information.
 
-## Architecture
+### Key Features
 
-The application consists of two main components:
+- PDF contract upload and processing
+- Automatic extraction of structured data using Mistral AI
+- User-friendly interface to view and analyze contract details
+- Fallback mechanisms for handling large documents and network issues
+- Support for both MongoDB and file-based storage
 
-### Backend (FastAPI)
+## Tech Stack
 
-- RESTful API for contract processing
-- Asynchronous background tasks for PDF text extraction
-- Integration with Mistral AI via OpenRouter API
-- MongoDB for data storage with file-based fallback
-- Multiple fallback strategies for API calls
-- Optimized large file handling with chunking and memory management
+### Backend
+- FastAPI (Python web framework)
+- Mistral AI (via OpenRouter API) for contract analysis
+- MongoDB (with file-based fallback) for data storage
+- PyPDF for PDF text extraction
 
-### Frontend (React)
+### Frontend
+- React.js
+- Material-UI for component styling
+- Axios for API communication
 
-- Modern React application with Material UI
-- Contract upload with drag-and-drop support
-- Real-time status tracking
-- Responsive design for all devices
-- Dynamic rendering of additional contract fields
+## Prerequisites
 
-## Setup Instructions
+Before running the application, make sure you have the following installed:
 
-### Prerequisites
+- Python 3.8+ 
+- Node.js 14+ and npm
+- MongoDB (optional, application will fall back to file-based storage)
+- OpenRouter API key (required for AI analysis)
 
-- Python 3.8+
-- Node.js 14+
-- MongoDB
-- OpenRouter API key
+## Installation and Setup
+
+### Clone the Repository
+
+```bash
+git clone <repository-url>
+cd Contract-I
+```
 
 ### Backend Setup
 
-1. Navigate to the backend directory:
-   ```
-   cd backend
-   ```
+1. Create a Python virtual environment:
 
-2. Create and activate a virtual environment:
-   ```
-   python -m venv cont
-   cont\Scripts\activate  # Windows
-   source cont/bin/activate  # Linux/Mac
-   ```
+```bash
+# Windows
+python -m venv cony
+cony\Scripts\activate
 
-3. Install dependencies:
-   ```
-   pip install -r requirements.txt
-   ```
+# Linux/Mac
+python -m venv cony
+source cony/bin/activate
+```
 
-4. Create a `.env` file with your OpenRouter API key:
-   ```
-   OPENROUTER_API_KEY=your_api_key_here
-   ```
+2. Install Python dependencies:
 
-5. Start the backend server:
-   ```
-   python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-   ```
+```bash
+pip install -r requirements.txt
+```
+
+3. Create a `.env` file in the backend directory:
+
+```bash
+cd backend
+echo "OPENROUTER_API_KEY=your_api_key_here" > .env
+```
+
+Replace `your_api_key_here` with your actual OpenRouter API key.
 
 ### Frontend Setup
 
-1. Navigate to the frontend directory:
-   ```
-   cd frontend
-   ```
+1. Install Node.js dependencies:
 
-2. Install dependencies:
-   ```
-   npm install
-   ```
+```bash
+cd frontend
+npm install
+```
 
-3. Start the development server:
-   ```
-   npm start
-   ```
+## Running the Application Locally
 
-4. Access the application at `http://localhost:3000`
+### Start the Backend Server
 
-## API Endpoints
+```bash
+cd backend
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
 
-- `POST /contracts/upload`: Upload a contract PDF
-- `GET /contracts/{contract_id}/status`: Get contract processing status
-- `GET /contracts/{contract_id}`: Get extracted contract data
-- `GET /contracts/{contract_id}/download`: Download the original contract PDF file
+The backend API will be available at http://localhost:8000
 
-## Data Structure
+### Start the Frontend Development Server
 
-Extracted contract data includes:
+```bash
+cd frontend
+npm install
+npm start
+```
 
-- `parties`: Information about parties involved in the contract
-- `financials`: Financial details and amounts
-- `payment_terms`: Payment schedules and terms
-- `sla`: Service Level Agreement details
-- `contacts`: Contact information for relevant parties
-- `additional_fields`: Any other important information found in the contract
+The frontend application will be available at http://localhost:3000
 
-## Development
+## Usage
 
-### Adding New Features
+1. Open your browser and navigate to http://localhost:3000
+2. Upload a contract PDF file using the upload button
+3. Wait for the analysis to complete
+4. View the extracted contract details in a structured format
 
-1. Backend: Extend the FastAPI routes in `backend/app/main.py`
-2. Frontend: Add new components in the `frontend/src/components` directory
+## Project Structure
 
-### Testing
+```
+Contract-I/
+├── backend/                # FastAPI backend
+│   ├── app/
+│   │   ├── main.py         # Main application file
+│   │   └── db.py           # Database connection
+│   ├── file_storage/       # Fallback storage for contract data
+│   └── uploads/            # Directory for uploaded PDF files
+├── frontend/               # React frontend
+│   ├── public/             # Static files
+│   ├── src/                # React source code
+│   │   ├── components/     # Reusable UI components
+│   │   ├── pages/          # Page components
+│   │   └── services/       # API service functions
+│   └── package.json        # Frontend dependencies
+└── requirements.txt        # Python dependencies
+```
 
-Upload sample contracts to test the extraction capabilities. The system is designed to handle various contract formats and extract both standard and non-standard fields.
+## Deployment
 
-### Large PDF Handling
+The application can be deployed using:
 
-The system includes several optimizations for handling large PDFs:
+- Backend: Hugging Face Spaces (using the provided Dockerfile.hf)
+- Frontend: Vercel or any static hosting service
 
-- **Chunked File Upload**: Files are streamed in 1MB chunks to prevent memory issues
-- **Memory-Optimized PDF Processing**: Pages are processed individually with garbage collection
-- **Document Chunking**: Large documents are split into manageable chunks for LLM processing
-- **Result Aggregation**: Results from multiple chunks are intelligently combined
-- **Increased Request Limits**: The API can handle files up to 50MB
+## Troubleshooting
 
-For best results with very large files (>20MB), allow additional processing time.
+### Common Issues
 
-## Docker Deployment
+1. **API Key Error**: Ensure your OpenRouter API key is correctly set in the `.env` file.
 
-### Local Development with Docker Compose
+2. **MongoDB Connection**: If MongoDB connection fails, the application will automatically fall back to file-based storage.
 
-1. Copy the example environment file and set your API key:
-   ```
-   cp .env.example .env
-   # Edit .env and add your OPENROUTER_API_KEY
-   ```
-
-2. Build and start the containers:
-   ```
-   docker-compose up --build
-   ```
-
-3. Access the application at `http://localhost:3000`
-
-### Production Deployment
-
-The application includes separate Dockerfiles for the backend and frontend for production deployment:
-
-1. Build the backend image:
-   ```
-   docker build -t contract-intelligence-backend ./backend
-   ```
-
-2. Build the frontend image:
-   ```
-   docker build -t contract-intelligence-frontend ./frontend
-   ```
-
-3. Run the containers with appropriate environment variables and volume mounts.
-
-## Hugging Face Deployment
-
-The application can be deployed to Hugging Face Spaces using the provided configuration:
-
-1. Create a new Space on Hugging Face:
-   - Go to https://huggingface.co/spaces
-   - Click "New Space"
-   - Choose "Docker" as the Space SDK
-   - Set the hardware tier (recommend at least CPU-M)
-
-2. Set up environment variables in your Hugging Face Space:
-   - `OPENROUTER_API_KEY`: Your OpenRouter API key for LLM access
-
-3. Push your code to the Hugging Face Space repository:
-   ```bash
-   # Clone your Space repository
-   git clone https://huggingface.co/spaces/YOUR_USERNAME/YOUR_SPACE_NAME
-   
-   # Copy your project files
-   cp -r /path/to/contract-intelligence/* ./YOUR_SPACE_NAME/
-   
-   # Rename the Hugging Face Dockerfile
-   cd YOUR_SPACE_NAME
-   mv Dockerfile.hf Dockerfile
-   
-   # Commit and push
-   git add .
-   git commit -m "Initial deployment"
-   git push
-   ```
-
-4. Hugging Face will automatically build and deploy your application
-
-5. Access your application at `https://huggingface.co/spaces/YOUR_USERNAME/YOUR_SPACE_NAME`
+3. **PDF Processing Errors**: For very large PDFs, the application uses chunking to process them in parts.
 
 ## License
 
-MIT
+[Specify your license here]
