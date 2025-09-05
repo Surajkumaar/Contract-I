@@ -19,6 +19,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pypdf import PdfReader
 from pydantic import BaseModel
 import motor.motor_asyncio
+from bson.objectid import ObjectId
+from pymongo.errors import ServerSelectionTimeoutError
 import httpx
 from bson import ObjectId
 
@@ -50,10 +52,33 @@ MISTRAL_MODEL = "mistralai/mistral-7b-instruct:free"  # free model
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# ----------------- MongoDB Client -----------------
-client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URL)
-db = client[DB_NAME]
-contracts_collection = db[COLLECTION_NAME]
+# ----------------- Storage System -----------------
+# Define a flag to track if MongoDB is available
+USE_MONGO = True
+
+# Create a directory for file-based storage as fallback
+FILE_STORAGE_DIR = "file_storage"
+os.makedirs(FILE_STORAGE_DIR, exist_ok=True)
+
+# Try to connect to MongoDB
+try:
+    # Set a short server selection timeout to fail fast if MongoDB is not available
+    client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URL, serverSelectionTimeoutMS=2000)
+    # Don't validate connection immediately - just set up the client
+    db = client[DB_NAME]
+    contracts_collection = db[COLLECTION_NAME]
+    print("✅ MongoDB client initialized - will test connection on first operation")
+    
+    # We'll validate the connection on first use, not here
+    # This avoids blocking startup and allows for MongoDB to become available later
+except Exception as e:
+    print(f"⚠️ MongoDB client initialization failed: {str(e)}")
+    print("⚠️ Falling back to file-based storage")
+    USE_MONGO = False
+    # Define dummy objects to prevent errors
+    client = None
+    db = None
+    contracts_collection = None
 
 # ----------------- FastAPI App -----------------
 app = FastAPI(title="Contract Intelligence API")
@@ -593,68 +618,49 @@ Contract text:
 
 async def process_contract(contract_id: str, file_path: str):
     """
-    Background task: extract PDF text, query LLM, update MongoDB
+    Background task: extract PDF text, query LLM, update storage
     """
     try:
-        await contracts_collection.update_one(
-            {"_id": contract_id},
-            {"$set": {"status": "processing", "progress": 10}}
-        )
+        # Update contract status to processing
+        update_contract_status(contract_id, {"status": "processing", "progress": 10})
 
         text = await extract_text_from_pdf(file_path)
 
-        await contracts_collection.update_one(
-            {"_id": contract_id},
-            {"$set": {"progress": 30}}
-        )
+        # Update progress
+        update_contract_status(contract_id, {"progress": 30})
 
         if not OPENROUTER_API_KEY:
             # If API key is missing, don't extract any data
-            await contracts_collection.update_one(
-                {"_id": contract_id},
-                {"$set": {
-                    "status": "completed",
-                    "progress": 100,
-                    "extracted_data": None,
-                    "error": "No API key provided. Only PDF storage is available."
-                }}
-            )
+            update_contract_status(contract_id, {
+                "status": "completed",
+                "progress": 100,
+                "extracted_data": None,
+                "error": "No API key provided. Only PDF storage is available."
+            })
             return
 
         # Test network connectivity first
-        await contracts_collection.update_one(
-            {"_id": contract_id},
-            {"$set": {"progress": 40}}
-        )
+        update_contract_status(contract_id, {"progress": 40})
         
         network_ok = await test_network_connectivity()
         if not network_ok:
-            await contracts_collection.update_one(
-                {"_id": contract_id},
-                {"$set": {
-                    "status": "error",
-                    "progress": 100,
-                    "error": "No internet connectivity detected. Please check your network connection."
-                }}
-            )
+            update_contract_status(contract_id, {
+                "status": "error",
+                "progress": 100,
+                "error": "No internet connectivity detected. Please check your network connection."
+            })
             return
             
-        await contracts_collection.update_one(
-            {"_id": contract_id},
-            {"$set": {"progress": 50}}
-        )
+        update_contract_status(contract_id, {"progress": 50})
             
         # If API key is available and network is working, proceed with extraction
         extracted_data = await query_mistral_llm(text)
 
-        await contracts_collection.update_one(
-            {"_id": contract_id},
-            {"$set": {
-                "status": "completed",
-                "progress": 100,
-                "extracted_data": extracted_data
-            }}
-        )
+        update_contract_status(contract_id, {
+            "status": "completed",
+            "progress": 100,
+            "extracted_data": extracted_data
+        })
     except Exception as e:
         error_message = str(e)
         # Provide more user-friendly error messages
@@ -665,14 +671,11 @@ async def process_contract(contract_id: str, file_path: str):
         elif "timeout" in error_message.lower():
             error_message = "Connection timeout. Please check your internet connection."
         
-        await contracts_collection.update_one(
-            {"_id": contract_id},
-            {"$set": {
-                "status": "error",
-                "progress": 100,
-                "error": error_message
-            }}
-        )
+        update_contract_status(contract_id, {
+            "status": "error",
+            "progress": 100,
+            "error": error_message
+        })
 
 # ----------------- Routes -----------------
 @app.post("/contracts/upload")
@@ -695,7 +698,29 @@ async def upload_contract(file: UploadFile = File(...), background_tasks: Backgr
         "error": None,
         "created_at": int(time.time())  # Unix timestamp for sorting
     }
-    await contracts_collection.insert_one(contract_doc)
+    
+    # Store contract metadata based on available storage
+    global USE_MONGO
+    if USE_MONGO:
+        try:
+            # Set a short timeout for this operation
+            await asyncio.wait_for(
+                contracts_collection.insert_one(contract_doc),
+                timeout=2.0
+            )
+        except (asyncio.TimeoutError, ServerSelectionTimeoutError) as e:
+            print(f"MongoDB connection timed out: {str(e)}")
+            print("Switching to file-based storage for future operations")
+            USE_MONGO = False
+            # Fall back to file storage
+            save_contract_to_file(contract_id, contract_doc)
+        except Exception as e:
+            print(f"MongoDB insert failed: {str(e)}")
+            # Fall back to file storage if MongoDB insert fails
+            save_contract_to_file(contract_id, contract_doc)
+    else:
+        # Use file-based storage
+        save_contract_to_file(contract_id, contract_doc)
 
     # Launch background processing
     background_tasks.add_task(process_contract, contract_id, file_path)
@@ -704,9 +729,34 @@ async def upload_contract(file: UploadFile = File(...), background_tasks: Backgr
 
 @app.get("/contracts/{contract_id}/status", response_model=ContractStatus)
 async def get_contract_status(contract_id: str):
-    contract = await contracts_collection.find_one({"_id": contract_id})
+    global USE_MONGO
+    contract = None
+    
+    # Try to get contract from available storage
+    if USE_MONGO:
+        try:
+            # Set a short timeout for this operation
+            contract = await asyncio.wait_for(
+                contracts_collection.find_one({"_id": contract_id}),
+                timeout=2.0
+            )
+        except (asyncio.TimeoutError, ServerSelectionTimeoutError) as e:
+            print(f"MongoDB connection timed out: {str(e)}")
+            print("Switching to file-based storage for future operations")
+            USE_MONGO = False
+            # Fall back to file storage
+            contract = load_contract_from_file(contract_id)
+        except Exception as e:
+            print(f"MongoDB find_one failed: {str(e)}")
+            # Fall back to file storage
+            contract = load_contract_from_file(contract_id)
+    else:
+        # Use file-based storage
+        contract = load_contract_from_file(contract_id)
+        
     if not contract:
         raise HTTPException(status_code=404, detail="Contract not found")
+        
     return ContractStatus(
         status=contract.get("status"),
         progress=contract.get("progress"),
@@ -716,38 +766,183 @@ async def get_contract_status(contract_id: str):
 
 @app.get("/contracts/{contract_id}")
 async def get_contract_data(contract_id: str):
-    contract = await contracts_collection.find_one({"_id": contract_id})
+    global USE_MONGO
+    contract = None
+    
+    # Try to get contract from available storage
+    if USE_MONGO:
+        try:
+            # Set a short timeout for this operation
+            contract = await asyncio.wait_for(
+                contracts_collection.find_one({"_id": contract_id}),
+                timeout=2.0
+            )
+        except (asyncio.TimeoutError, ServerSelectionTimeoutError) as e:
+            print(f"MongoDB connection timed out: {str(e)}")
+            print("Switching to file-based storage for future operations")
+            USE_MONGO = False
+            # Fall back to file storage
+            contract = load_contract_from_file(contract_id)
+        except Exception as e:
+            print(f"MongoDB find_one failed: {str(e)}")
+            # Fall back to file storage
+            contract = load_contract_from_file(contract_id)
+    else:
+        # Use file-based storage
+        contract = load_contract_from_file(contract_id)
+        
     if not contract:
         raise HTTPException(status_code=404, detail="Contract not found")
-    return contract.get("extracted_data", {})
+        
+    # Return the full contract object instead of just extracted_data
+    # This allows the frontend to display contract info for any status
+    return contract
 
 @app.get("/contracts")
 async def list_contracts():
     """Get a list of all contracts with their status information"""
+    global USE_MONGO
     contracts = []
-    cursor = contracts_collection.find({}, {
-        "_id": 1,
-        "filename": 1,
-        "status": 1,
-        "progress": 1,
-        "error": 1,
-        "created_at": 1
-    })
     
-    async for doc in cursor:
-        # Convert MongoDB _id to contract_id string for frontend
-        # Handle ObjectId serialization
-        if isinstance(doc["_id"], ObjectId):
-            doc["contract_id"] = str(doc["_id"])
-        else:
-            doc["contract_id"] = doc["_id"]
-        
-        # Remove the _id field to avoid serialization issues
-        doc.pop("_id")
-        contracts.append(doc)
+    if USE_MONGO:
+        try:
+            # Set a short timeout for this operation
+            cursor = contracts_collection.find({}, {
+                "_id": 1,
+                "filename": 1,
+                "status": 1,
+                "progress": 1,
+                "error": 1,
+                "created_at": 1
+            })
+            
+            # Use a timeout for the cursor iteration
+            async def get_docs_with_timeout():
+                docs = []
+                async for doc in cursor:
+                    # Convert MongoDB _id to contract_id string for frontend
+                    # Handle ObjectId serialization
+                    if isinstance(doc["_id"], ObjectId):
+                        doc["contract_id"] = str(doc["_id"])
+                    else:
+                        doc["contract_id"] = doc["_id"]
+                    
+                    # Remove the _id field to avoid serialization issues
+                    doc.pop("_id")
+                    docs.append(doc)
+                return docs
+                
+            # Execute with timeout
+            contracts = await asyncio.wait_for(get_docs_with_timeout(), timeout=3.0)
+            
+        except (asyncio.TimeoutError, ServerSelectionTimeoutError) as e:
+            print(f"MongoDB connection timed out: {str(e)}")
+            print("Switching to file-based storage for future operations")
+            USE_MONGO = False
+            # Fall back to file storage
+            contracts = load_all_contracts_from_files()
+        except Exception as e:
+            print(f"MongoDB find failed: {str(e)}")
+            # Fall back to file storage
+            contracts = load_all_contracts_from_files()
+    else:
+        # Use file-based storage
+        contracts = load_all_contracts_from_files()
     
     # Sort by most recently created first (if created_at exists)
     contracts.sort(key=lambda x: x.get("created_at", 0), reverse=True)
     
     return contracts
 
+
+# ----------------- File-based Storage Functions -----------------
+def save_contract_to_file(contract_id: str, contract_data: dict):
+    """Save contract data to a JSON file"""
+    try:
+        file_path = os.path.join(FILE_STORAGE_DIR, f"{contract_id}.json")
+        with open(file_path, 'w') as f:
+            json.dump(contract_data, f)
+        print(f"✅ Saved contract {contract_id} to file storage")
+        return True
+    except Exception as e:
+        print(f"❌ Error saving contract to file: {str(e)}")
+        return False
+
+def load_contract_from_file(contract_id: str) -> dict:
+    """Load contract data from a JSON file"""
+    try:
+        file_path = os.path.join(FILE_STORAGE_DIR, f"{contract_id}.json")
+        if not os.path.exists(file_path):
+            return None
+        with open(file_path, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"❌ Error loading contract from file: {str(e)}")
+        return None
+
+def load_all_contracts_from_files() -> list:
+    """Load all contracts from JSON files"""
+    contracts = []
+    try:
+        for filename in os.listdir(FILE_STORAGE_DIR):
+            if filename.endswith('.json'):
+                contract_id = filename.replace('.json', '')
+                contract = load_contract_from_file(contract_id)
+                if contract:
+                    # Add contract_id field for frontend compatibility
+                    contract['contract_id'] = contract['_id']
+                    # Remove _id to avoid serialization issues
+                    if '_id' in contract:
+                        contract.pop('_id')
+                    contracts.append(contract)
+        return contracts
+    except Exception as e:
+        print(f"❌ Error loading contracts from files: {str(e)}")
+        return []
+
+def update_contract_status(contract_id: str, update_data: dict):
+    """Update contract status in the appropriate storage"""
+    if USE_MONGO:
+        try:
+            # Try MongoDB first
+            asyncio.create_task(_update_mongo_contract(contract_id, update_data))
+        except Exception as e:
+            print(f"MongoDB update failed: {str(e)}")
+            # Fall back to file storage
+            _update_file_contract(contract_id, update_data)
+    else:
+        # Use file-based storage
+        _update_file_contract(contract_id, update_data)
+
+async def _update_mongo_contract(contract_id: str, update_data: dict):
+    """Update contract in MongoDB"""
+    global USE_MONGO
+    try:
+        # Set a short timeout for this operation
+        await asyncio.wait_for(
+            contracts_collection.update_one(
+                {"_id": contract_id},
+                {"$set": update_data}
+            ),
+            timeout=2.0
+        )
+    except (asyncio.TimeoutError, ServerSelectionTimeoutError) as e:
+        print(f"MongoDB connection timed out: {str(e)}")
+        print("Switching to file-based storage for future operations")
+        USE_MONGO = False
+        # Fall back to file storage
+        _update_file_contract(contract_id, update_data)
+    except Exception as e:
+        print(f"MongoDB update failed: {str(e)}")
+        # Fall back to file storage
+        _update_file_contract(contract_id, update_data)
+
+def _update_file_contract(contract_id: str, update_data: dict):
+    """Update contract in file storage"""
+    try:
+        contract = load_contract_from_file(contract_id)
+        if contract:
+            contract.update(update_data)
+            save_contract_to_file(contract_id, contract)
+    except Exception as e:
+        print(f"File storage update failed: {str(e)}")

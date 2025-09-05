@@ -31,22 +31,29 @@ const Dashboard = () => {
     }
   };
 
+  // Use ref to track if we have processing contracts without causing effect to re-run
+  const processingContractsRef = React.useRef(false);
+  
+  // Update ref when contracts change
+  useEffect(() => {
+    processingContractsRef.current = contracts.some(
+      contract => contract.status === 'processing' || contract.status === 'uploaded'
+    );
+  }, [contracts]);
+
   useEffect(() => {
     fetchContracts();
     
-    // Set up polling for in-progress contracts
+    // Set up polling for in-progress contracts with longer interval
     const intervalId = setInterval(() => {
-      const hasProcessingContracts = contracts.some(
-        contract => contract.status === 'processing' || contract.status === 'uploaded'
-      );
-      
-      if (hasProcessingContracts) {
+      // Only fetch if we have processing contracts
+      if (processingContractsRef.current) {
         fetchContracts();
       }
-    }, 5000);
+    }, 10000); // Increased to 10 seconds to reduce server load
     
     return () => clearInterval(intervalId);
-  }, [contracts]);
+  }, []); // Empty dependency array so it only runs once on mount
 
   const handleRefresh = () => {
     fetchContracts();

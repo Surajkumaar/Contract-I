@@ -1,5 +1,4 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import CardActions from '@mui/material/CardActions';
@@ -7,12 +6,10 @@ import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import Box from '@mui/material/Box';
 import LinearProgress from '@mui/material/LinearProgress';
-import VisibilityIcon from '@mui/icons-material/Visibility';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import Chip from '@mui/material/Chip';
 
 const ContractCard = ({ contract }) => {
-  const navigate = useNavigate();
   
   const getStatusColor = (status) => {
     switch (status) {
@@ -29,9 +26,6 @@ const ContractCard = ({ contract }) => {
     }
   };
 
-  const handleViewClick = () => {
-    navigate(`/contracts/${contract._id}`);
-  };
 
   return (
     <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -68,16 +62,6 @@ const ContractCard = ({ contract }) => {
         )}
       </CardContent>
       
-      <CardActions>
-        <Button 
-          size="small" 
-          startIcon={<VisibilityIcon />} 
-          onClick={handleViewClick}
-          disabled={contract.status === 'uploaded' || contract.status === 'processing'}
-        >
-          View Details
-        </Button>
-      </CardActions>
     </Card>
   );
 };

@@ -34,10 +34,14 @@ const ContractView = () => {
       const statusData = await ContractService.getContractStatus(contractId);
       setStatus(statusData);
       
-      // If completed, get the extracted data
-      if (statusData.status === 'completed') {
+      // Get the contract data for any status
+      try {
         const contractData = await ContractService.getContractData(contractId);
         setContract(contractData);
+      } catch (dataErr) {
+        // If contract data isn't available yet, just continue with status
+        console.log('Contract data not available yet:', dataErr);
+        // Don't set error here, as we still have status information
       }
     } catch (err) {
       console.error('Error fetching contract data:', err);
@@ -47,18 +51,28 @@ const ContractView = () => {
     }
   };
 
+  // Use ref to track processing status without causing effect to re-run
+  const processingStatusRef = React.useRef(false);
+  
+  // Update ref when status changes
+  useEffect(() => {
+    if (status) {
+      processingStatusRef.current = status.status === 'processing' || status.status === 'uploaded';
+    }
+  }, [status]);
+
   useEffect(() => {
     fetchContractData();
     
-    // Poll for updates if the contract is still processing
+    // Poll for updates if the contract is still processing with longer interval
     const intervalId = setInterval(() => {
-      if (status && (status.status === 'processing' || status.status === 'uploaded')) {
+      if (processingStatusRef.current) {
         fetchContractData();
       }
-    }, 3000);
+    }, 10000); // Increased to 10 seconds to reduce server load
     
     return () => clearInterval(intervalId);
-  }, [contractId, status]);
+  }, [contractId]); // Only depend on contractId, not status
 
   const handleRefresh = () => {
     fetchContractData();
@@ -213,29 +227,24 @@ const ContractView = () => {
             )}
           </Paper>
 
-          {status.status === 'completed' && contract ? (
+          {contract ? (
             <Box>
-              {renderContractSection('Parties', contract.parties)}
-              {renderContractSection('Financials', contract.financials)}
-              {renderContractSection('Payment Terms', contract.payment_terms)}
-              {renderContractSection('Service Level Agreement', contract.sla)}
-              {renderContractSection('Contacts', contract.contacts)}
-              {renderAdditionalFields(contract.additional_fields)}
-              
               <Paper sx={{ p: 3, mt: 4 }}>
                 <Typography variant="h6" gutterBottom>
-                  Raw JSON Data
+                  Extracted Contract Data (Raw JSON)
                 </Typography>
                 <Box 
                   sx={{ 
                     backgroundColor: 'grey.100', 
                     p: 2, 
                     borderRadius: 1,
-                    overflowX: 'auto'
+                    overflowX: 'auto',
+                    maxHeight: '70vh',
+                    overflow: 'auto'
                   }}
                 >
                   <pre style={{ margin: 0 }}>
-                    {JSON.stringify(contract, null, 2)}
+                    {JSON.stringify(contract.extracted_data || contract, null, 2)}
                   </pre>
                 </Box>
               </Paper>
