@@ -1,1 +1,0 @@
-{"_id": "aeccec92-1f90-41e3-8c4b-3e688cf5ec2a", "filename": "take this as reff and give new one.pdf", "status": "error", "progress": 100, "file_size_bytes": 222283, "extracted_data": null, "error": "OPENROUTER_API_KEY environment variable is not set. Please set it before making API calls.", "created_at": 1757088717}

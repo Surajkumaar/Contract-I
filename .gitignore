@@ -22,6 +22,7 @@ var/
 
 # Virtual Environment
 backend/cont/
+cony/
 venv/
 ENV/
 env/
@@ -57,6 +58,9 @@ backend/.env
 # Uploaded files
 backend/uploads/*.pdf
 !backend/uploads/.gitkeep
+
+# File storage (processed contract data)
+backend/file_storage/
 
 # IDE specific files
 .idea/
