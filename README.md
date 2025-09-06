@@ -46,9 +46,9 @@ cd Contract-I
 ```
 
 2. **Set up environment variables:**
-```bash
-# Create .env file in project root (optional but recommended)
-echo "OPENROUTER_API_KEY=your_api_key_here" > .env
+Create a `.env` file in the project root with the following format:
+```
+OPENROUTER_API_KEY=your_api_key_here
 ```
 
 3. **Start the application:**
@@ -96,7 +96,10 @@ pip install -r requirements.txt
 3. **Configure environment:**
 ```bash
 cd backend
-echo "OPENROUTER_API_KEY=your_api_key_here" > .env
+```
+Create a `.env` file in the backend directory with the following format:
+```
+OPENROUTER_API_KEY=your_api_key_here
 ```
 
 4. **Start backend:**
@@ -162,16 +165,15 @@ The application uses the following environment variables:
 ### Setting Environment Variables
 
 **For Docker (Recommended):**
-```bash
-# Create .env file in project root
-echo "OPENROUTER_API_KEY=your_api_key_here" > .env
+Create a `.env` file in the project root with the following format:
+```
+OPENROUTER_API_KEY=your_api_key_here
 ```
 
 **For Manual Installation:**
-```bash
-# Create .env file in backend directory
-cd backend
-echo "OPENROUTER_API_KEY=your_api_key_here" > .env
+Create a `.env` file in the backend directory with the following format:
+```
+OPENROUTER_API_KEY=your_api_key_here
 ```
 
 **For Production:**

@@ -149,7 +149,7 @@ const ContractUpload = () => {
           </Typography>
           
           <Typography variant="body2" color="text.secondary" gutterBottom>
-            or click to browse files (multiple files supported)
+            or click to browse files 
           </Typography>
           
           {files.length > 0 && (
