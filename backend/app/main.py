@@ -867,7 +867,8 @@ async def query_mistral_llm_requests_fallback(contract_text: str) -> dict:
     Fallback function using requests library with aggressive SSL bypass
     """
     if not OPENROUTER_API_KEY:
-        raise ValueError("OPENROUTER_API_KEY environment variable is not set.")
+        print("⚠️ OPENROUTER_API_KEY not set in requests fallback, using regex extraction")
+        return extract_contract_data_with_regex(contract_text)
         
     system_prompt = "You are a specialized AI assistant for contract analysis. Your task is to extract structured information from contract documents and return it as valid JSON. Be precise and thorough in your extraction."
     
@@ -1067,7 +1068,8 @@ async def query_mistral_llm(contract_text: str) -> dict:
     """
     # Check if API key is available
     if not OPENROUTER_API_KEY:
-        raise ValueError("OPENROUTER_API_KEY environment variable is not set. Please set it before making API calls.")
+        print("⚠️ OPENROUTER_API_KEY not set, using regex fallback extraction")
+        return extract_contract_data_with_regex(contract_text)
         
     system_prompt = "You are a specialized AI assistant for contract analysis. Your task is to extract structured information from contract documents and return it as valid JSON. Be precise and thorough in your extraction."
     
