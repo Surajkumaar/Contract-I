@@ -14,4 +14,4 @@ RUN mkdir -p uploads file_storage
 EXPOSE 8000
 
 # Command to run the application
-CMD ["sh", "-c", "export $(cat /app/.env | grep -v '^#' | xargs -d '\n') && pip install -r /requirements.txt && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+CMD ["sh", "-c", "pip install -r /requirements.txt && uvicorn app.main:app --host 0.0.0.0 --port 8000"]

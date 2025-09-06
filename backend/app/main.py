@@ -678,7 +678,7 @@ def extract_contract_data_with_regex(contract_text: str) -> dict:
             extracted_data[key] = None
     
     print(f"✅ Regex extraction completed. Found {len(extracted_data['parties']) if extracted_data['parties'] else 0} parties, {len(amounts_found)} financial amounts")
-    print(f"📊 Extraction quality: Parties={len(extracted_data['parties'])}, Contacts={len(extracted_data['contacts'])}, SLA={'Yes' if extracted_data['sla'] else 'No'}")
+    print(f"📊 Extraction quality: Parties={len(extracted_data['parties']) if extracted_data['parties'] else 0}, Contacts={len(extracted_data['contacts']) if extracted_data['contacts'] else 0}, SLA={'Yes' if extracted_data['sla'] else 'No'}")
     
     return extracted_data
 
@@ -1282,17 +1282,9 @@ Contract text:
                                 except Exception as e:
                                     print(f"Failed to fix JSON: {str(e)}")
                                     
-                                # If all parsing fails, return structured data with the raw text
-                                return {
-                                    "parties": None, 
-                                    "financials": None, 
-                                    "payment_terms": None, 
-                                    "sla": None, 
-                                    "contacts": None,
-                                    "additional_fields": {
-                                        "raw_text": text_output
-                                    }
-                                }
+                                # If all parsing fails, fall back to regex extraction
+                                print("🔄 JSON parsing completely failed, falling back to regex extraction")
+                                return extract_contract_data_with_regex(contract_text)
                         else:
                             last_error = ValueError(f"Unexpected API response format: {data}")
                             

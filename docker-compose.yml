@@ -8,11 +8,10 @@ services:
     volumes:
       - ./backend/uploads:/app/uploads
       - ./backend/file_storage:/app/file_storage
-      - ./backend/.env:/app/.env
       - ./requirements.txt:/requirements.txt
     environment:
       - MONGO_URL=mongodb://mongodb:27017
-      - OPENROUTER_API_KEY=sk-or-v1-38cf614d3718496e1a875477902868d923f2e7bf31db7ef738377da47198c3b50
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
     depends_on:
       - mongodb
     networks:
