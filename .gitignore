@@ -60,7 +60,8 @@ backend/uploads/*.pdf
 !backend/uploads/.gitkeep
 
 # File storage (processed contract data)
-backend/file_storage/
+backend/file_storage/*.json
+backend/file_storage/*.pdf
 
 # IDE specific files
 .idea/
